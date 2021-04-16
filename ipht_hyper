@@ -1,0 +1,1131 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Thu Dec 24 16:15:04 2020
+
+@author: juand
+"""
+from matplotlib.colors import ListedColormap, LinearSegmentedColormap, BoundaryNorm
+from scipy.interpolate import Rbf
+import math
+import pandas as pd
+import matplotlib.pyplot as plt
+import scipy.signal 
+import numpy as np
+from scipy.sparse import csc_matrix, eye, diags
+from scipy.sparse.linalg import spsolve
+#from kneed import KneeLocator
+from sklearn.datasets import make_blobs
+from sklearn.cluster import KMeans
+from sklearn.metrics import silhouette_score
+from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import normalize
+import pysptools.util as util
+import pysptools.eea as eea
+import pysptools.abundance_maps as amp
+from sklearn.cluster import spectral_clustering
+import os
+import matplotlib.patches as mpatches
+from math import nan
+from sklearn.neighbors import LocalOutlierFactor
+import matplotlib.colors as colors
+from math import nan
+from matplotlib.widgets import EllipseSelector
+from scipy.signal import find_peaks
+from sklearn.cluster import AgglomerativeClustering
+from sklearn.neighbors import kneighbors_graph
+import scipy.cluster.hierarchy as sch
+from sklearn.decomposition import PCA
+from sklearn.decomposition import KernelPCA 
+from mpl_toolkits import mplot3d
+from scipy.io import loadmat
+import matplotlib as mpl
+import math
+from pylab import arange,pi,sin,cos,sqrt
+from matplotlib import cm
+
+def fixer(y,m, limit):     
+    spikes = abs(np.array(modified_z_score(np.diff(y)))) > limit
+    y_out = y.copy() # So we don’t overwrite y
+    for i in np.arange(len(spikes)-m):
+            if spikes[i] != 0: # If we have an spike in position i
+                w = np.arange(i-m,i+1+m) # we select 2 m + 1 points around our spike
+                try:
+                    w2 = w[spikes[w] == 0] # From such interval, we choose the ones which are not spikes
+                    y_out[i] = np.mean(y[w2]) # and we average their values
+                    print('spike')
+                except:
+                    print('warning: max edge')
+    return y_out
+
+def peak_finder(num, axs, normalized_avg, prominence):
+    
+    exp = normalized_avg.to_numpy()
+    wave =  pd.to_numeric(normalized_avg.index).to_numpy()
+    peaks, _ = find_peaks(exp, prominence = prominence)
+
+    index = peaks.copy()
+
+    for count in range(len(peaks)):
+        value_chosen = peaks[count]
+        minimum = float("inf")
+        count1 = 0
+        for value in wave:
+            count1+=1
+            if abs(value - value_chosen) < minimum:
+                index[count] = count1
+                minimum = abs(value - value_chosen)
+           
+    for item in peaks:
+        axs.annotate(int(wave[item]), xy = (wave[item], exp[item]), rotation = 90, size = 8)
+
+def modified_z_score(delta_int):
+
+    median_int = np.median(delta_int)
+    mad_int = np.median([np.abs(delta_int-median_int)])
+    modified_z_scores = 0.6745*(delta_int-median_int)/mad_int
+    
+    #print('aja', delta_int)
+    
+    return modified_z_scores
+
+def save_data(data, path, name):
+    gfg_csv_data = pd.DataFrame(data).to_csv(path + name + '.csv', index = False, header = True) 
+
+def save_plot(path, dpi, fig, name, data, type_file):
+    if path != None:
+        fig.savefig(path + name + '.' + type_file, orientation = 'portrait', format = type_file, dpi = dpi)
+        data['class'] = name
+        save_data(data, path, name + '_data')
+        #print('I dont')
+        
+def display_multi(data, path, name, values, colors, type_file, enable):
+        indices = []
+        final = []
+        #!python numbers=disable
+        fig_width_pt = 246.0  # Get this from LaTeX using \showthe\columnwidth
+        inches_per_pt = 1.0/72.27               # Convert pt to inches
+        golden_mean = (sqrt(5)-1.0)/2.0         # Aesthetic ratio
+        fig_width = fig_width_pt*inches_per_pt  # width in inches
+        fig_height =fig_width*golden_mean       # height in inches
+        fig_size = [fig_width,fig_height] 
+        
+        # Edit the font, font size, and axes width
+        mpl.rcParams['font.family'] = 'Times New Roman'
+        plt.rcParams['font.size'] = 10
+        plt.rcParams['legend.fontsize'] = 8
+        plt.rcParams['xtick.labelsize'] = 8
+        plt.rcParams['ytick.labelsize'] = 8
+        plt.rcParams['axes.labelsize'] = 10
+        
+        plt.rcParams['figure.figsize'] = fig_size
+        
+        #print (values)
+        
+        fig, axs = plt.subplots(len(values), sharex = 'all', sharey = 'all', figsize = fig_size, dpi = 300, gridspec_kw = {'hspace': 0.02, 'wspace': 0})
+        
+        average = pd.DataFrame()
+        normalized_avg = pd.DataFrame()
+        normalized_std = pd.DataFrame()
+        
+        std = pd.DataFrame()
+        
+        if len(values)>1:
+            for count in range(len(values)):
+                
+                frame = data[data['cluster'] == values[count]].drop(columns = 'cluster')
+                #print(len(frame.index))
+                if len(frame.index > 1):
+                    average[count] = frame.mean()
+                    std[count] = frame.std()
+                    
+                    #####Normalization
+                    maximum_avg = average[count].max()
+                    minimum_avg = average[count].min()
+                    
+                    normalized_avg[count] = (average[count] - minimum_avg) / (maximum_avg - minimum_avg)
+                    normalized_std[count] = (std[count] - minimum_avg) / (maximum_avg - minimum_avg)
+                
+                    axs[count].plot(pd.to_numeric(frame.columns), normalized_avg[count], color = colors[count], label = int(values[count]), linewidth = 1)
+                    axs[count].legend(str(values[count]+1), frameon = False, loc = 'upper left')
+                
+                    axs[count].plot(pd.to_numeric(frame.columns), normalized_avg[count] - normalized_std[count], color = colors[count], linewidth = 0.4)
+                    axs[count].plot(pd.to_numeric(frame.columns), normalized_avg[count] + normalized_std[count], color = colors[count], linewidth = 0.4)
+                    axs[count].fill_between(pd.to_numeric(frame.columns), normalized_avg[count] - normalized_std[count], normalized_avg[count] + normalized_std[count], alpha = 0.2, color = colors[count])
+                
+                    axs[count].xaxis.set_major_locator(mpl.ticker.MultipleLocator(300))
+                    axs[count].xaxis.set_minor_locator(mpl.ticker.MultipleLocator(100))
+                    #axs[count].spines['bottom'].set_visible(False)
+                    axs[count].spines['top'].set_visible(False)
+                    axs[count].spines['right'].set_visible(False)
+                    axs[count].tick_params(left = False)
+                    #axs[count].set_ylim([0,1])
+                    #axs[count].set_ylabel('Intensity')
+                    axs[count].xaxis.set_visible(True)
+                    axs[count].set(yticklabels=[])  
+                    axs[count].set_xlabel('Raman Shift 1/cm')
+                else:                   
+                    average = frame
+                    #####Normalization
+                    maximum_avg = average[count].max()
+                    minimum_avg = average[count].min()             
+                    normalized_avg[count] = (average[count] - minimum_avg) / (maximum_avg - minimum_avg) 
+                    axs[count].plot(pd.to_numeric(frame.columns), normalized_avg[count], color = colors[count], label = int(values[count]), linewidth = 1)
+                    axs[count].legend(str(values[count]+1), frameon = False, loc = 'upper left')
+                    axs[count].xaxis.set_major_locator(mpl.ticker.MultipleLocator(300))
+                    axs[count].xaxis.set_minor_locator(mpl.ticker.MultipleLocator(100))
+                    #axs[count].spines['bottom'].set_visible(False)
+                    axs[count].spines['top'].set_visible(False)
+                    axs[count].spines['right'].set_visible(False)
+                    axs[count].tick_params(left = False)
+                    axs[count].xaxis.set_visible(True)
+                    axs[count].set(yticklabels=[])  
+                    axs[count].set_xlabel('Raman Shift 1/cm')
+                    
+                if enable == 1:
+                    peak_finder(count, axs[count], normalized_avg[count], 0.1)
+        else:
+            count= 0
+            frame = data[data['cluster'] == values[count]].drop(columns = 'cluster')
+            average[count] = frame.mean()
+            std[count] = frame.std()
+            
+            #####Normalization
+            maximum_avg = average[count].max()
+            minimum_avg = average[count].min()
+            
+            normalized_avg[count] = (average[count] - minimum_avg) / (maximum_avg - minimum_avg)
+            normalized_std[count] = (std[count] - minimum_avg) / (maximum_avg - minimum_avg)
+            
+            axs.plot(pd.to_numeric(frame.columns), normalized_avg[count], color = colors[count], label = int(values[count]), linewidth = 1)
+            axs.legend(str(count + 1), frameon = False, loc = 'upper left')
+            
+            axs.plot(pd.to_numeric(frame.columns), normalized_avg[count] - normalized_std[count], color = colors[count], linewidth = 0.4)
+            axs.plot(pd.to_numeric(frame.columns), normalized_avg[count] + normalized_std[count], color = colors[count], linewidth = 0.4)
+            axs.fill_between(pd.to_numeric(frame.columns), normalized_avg[count] - normalized_std[count], normalized_avg[count] + normalized_std[count], alpha = 0.2, color = colors[count])
+            
+            axs.xaxis.set_major_locator(mpl.ticker.MultipleLocator(300))
+            axs.xaxis.set_minor_locator(mpl.ticker.MultipleLocator(100))
+            #axs[count].spines['bottom'].set_visible(False)
+            axs.spines['top'].set_visible(False)
+            axs.spines['right'].set_visible(False)
+            axs.tick_params(left = False)
+            #axs[count].set_ylabel('Intensity')
+            axs.xaxis.set_visible(True)
+            axs.set(yticklabels=[])  
+            axs.set_xlabel('Raman Shift 1/cm')    
+        
+            if enable == 1:
+                peak_finder(count, axs, normalized_avg[count], 0.1)
+                    
+        #fig.suptitle(name)
+        plt.ylabel('Intensity' )
+        
+        #plt.xlabel('Raman Shift 1/cm')
+        fig.canvas.set_window_title(name) 
+        
+        final = normalized_avg.T
+        final['cluster'] = values + 1
+        #final.columns = data.columns
+        save_plot(path, 300, fig, name + '_centers', final, type_file)
+
+        fig.canvas.draw()
+        fig.canvas.flush_events()
+        plt.autoscale()
+        #plt.tight_layout(pad=0.4, w_pad=0.5, h_pad=1.0)        
+
+def display_scatter(num_components, data, cluster):
+    colors = ['#e41a1c', '#377eb8', '#4daf4a', 'black']
+    if num_components == 3:
+        fig = plt.figure() 
+        ax = plt.axes(projection ="3d")
+        ax.set_xlabel('1 component')
+        ax.set_ylabel('2 component')
+        ax.set_zlabel('3 component')
+        ax.scatter3D(data[0], data[1], data[2], c = cluster.T)
+        plt.show()
+
+    if num_components == 2:
+        fig = plt.figure() 
+        plt.xlabel('1 component')
+        plt.ylabel('2 component')
+        x= data[0]
+        y= data[1]
+        z = cluster.T
+        
+        tx = np.linspace(-2.0, 2.0, 100)
+        ty = np.linspace(-2.0, 2.0, 100)
+        XI, YI = np.meshgrid(tx, ty)
+
+        # use RBF
+        #rbf = Rbf(x, y, z, epsilon=2)
+        #ZI = rbf(XI, YI)
+        
+        #plt.pcolor(XI, YI, ZI, cmap=cm.jet, shading = 'auto')
+
+        plt.scatter(x, y, c = cluster.T)
+
+        plt.show()
+    print(cluster.T.to_numpy())
+            
+def CSV_to_Cube(data, n, m, p): # straigh configuration
+    
+    matrix = np.zeros((n,m,p)) 
+    for j in range(0, n):
+        for i in range(0, m):
+            for l in range(0, p):
+                matrix[j, i,l] = data[j*m+i,l]
+    return matrix
+
+def WhittakerSmooth(x,w,lambda_,differences=1):
+    '''
+    Penalized least squares algorithm for background fitting
+    
+    input
+        x: input data (i.e. chromatogram of spectrum)
+        w: binary masks (value of the mask is zero if a point belongs to peaks and one otherwise)
+        lambda_: parameter that can be adjusted by user. The larger lambda is,  the smoother the resulting background
+        differences: integer indicating the order of the difference of penalties
+    
+    output
+        the fitted background vector
+    '''
+    X=np.matrix(x)
+    m=X.size
+    E=eye(m,format='csc')
+    D=E[1:]-E[:-1] # numpy.diff() does not work with sparse matrix. This is a workaround.
+    W=diags(w,0,shape=(m,m))
+    A=csc_matrix(W+(lambda_*D.T*D))
+    B=csc_matrix(W*X.T)
+    background=spsolve(A,B)
+    return np.array(background)
+
+def airPLS(x, lambda_, porder = 1, itermax = 50):
+    '''
+    Adaptive iteratively reweighted penalized least squares for baseline fitting
+    
+    input
+        x: input data (i.e. chromatogram of spectrum)
+        lambda_: parameter that can be adjusted by user. The larger lambda is,  the smoother the resulting background, z
+        porder: adaptive iteratively reweighted penalized least squares for baseline fitting
+    
+    output
+        the fitted background vector
+    '''
+    m=x.shape[0]
+    w=np.ones(m)
+    for i in range(1,itermax+1):
+        z=WhittakerSmooth(x,w,lambda_, porder)
+        d=x-z
+        dssn=np.abs(d[d<0].sum())
+        if(dssn<0.001*(abs(x)).sum() or i==itermax):
+            if(i==itermax): print( 'WARNING max iteration reached!')
+            break
+        w[d>=0]=0 # d>0 means that this point is part of a peak, so its weight is set to 0 in order to ignore it
+        w[d<0]=np.exp(i*np.abs(d[d<0])/dssn)
+        w[0]=np.exp(i*(d[d<0]).max()/dssn) 
+        w[-1]=w[0]
+    return z
+
+def reduced_to_large(d_original, data, index): ###convert the cluster to the same size as data index
+    
+        #Merge original and data        
+        index_original = d_original.index
+        index_th = data.index
+        count = 0
+        original = np.zeros(len(d_original.index))
+        for item in range(len(index_original)):
+            if count < len(index_th):
+                if index_original[item] == index_th[count]:
+                    original[item] = data.iloc[count, index]
+                    count+=1
+                else:
+                    original[item] = np.nan
+            else:
+                original[item] = np.nan
+        
+        #print (d_original, data, index)
+        return original 
+    
+def reduced_to_large2D(d_original, data):
+    
+        #Merge original and data        
+        index_original = d_original.index
+        index_th = data.index
+        count = 0
+        zero = np.zeros((len(data.columns)*len(d_original.index)))
+        zero = np.reshape(zero, (len(d_original.index), len(data.columns)))
+        
+        original = pd.DataFrame(zero)
+        original.columns = data.columns
+        original.index = d_original.index
+        
+        for item in range(len(index_original)):
+            if count < len(index_th):
+                if index_original[item] == index_th[count]:
+                    original.iloc[item,:] = data.iloc[count,:]
+                    count+=1
+                else:
+                    original.iloc[item, :] = np.nan
+            else:
+                original.iloc[item,:] = np.nan
+        
+        return original
+    
+def plotting(position, data, resolution, d_original, index, interpolation, name, name_hyper, legend, centers, path, data_o, n, m, type_file):
+        
+        ##############################################################
+        ############# plotting setup #################################
+        #############################################################
+        
+        values = []
+        #!python numbers=disable
+        fig_width_pt = 246.0  # Get this from LaTeX using \showthe\columnwidth
+        inches_per_pt = 1.0/72.27               # Convert pt to inches
+        golden_mean = (sqrt(5)-1.0)/2.0         # Aesthetic ratio
+        fig_width = fig_width_pt*inches_per_pt  # width in inches
+        fig_height =fig_width*golden_mean       # height in inches
+        fig_size = [fig_width,fig_height]
+        
+        # Edit the font, font size, and axes width
+        mpl.rcParams['font.family'] = 'Times New Roman'
+        plt.rcParams['font.size'] = 10
+        plt.rcParams['legend.fontsize'] = 8
+        plt.rcParams['xtick.labelsize'] = 8
+        plt.rcParams['ytick.labelsize'] = 8
+        plt.rcParams['axes.labelsize'] = 10
+        
+        plt.rcParams['figure.figsize'] = fig_size
+    
+        """it shows the plot of spectra
+        
+        position : type
+        Description of parameter `x`.
+        y
+        Description of parameter `y` (with type not specified).
+    
+        """
+        fig = plt.figure(num = name_hyper + ' ' + str(name), figsize = fig_size, dpi = 300)    
+        size_x = resolution*m
+        size_y = resolution*n
+        
+        plot = reduced_to_large(d_original, data, index)
+        
+        im = plt.imshow(np.reshape(plot, (-1, m)), cmap = 'jet', extent = [0, size_x, 0, size_y], interpolation = interpolation)
+        
+        plt.xlabel(' Size [mm]')
+        plt.ylabel(' Size [mm]')
+        #plt.title(name)
+        
+        if legend == 'cluster':
+            matrix = data.iloc[:, index].to_numpy()
+            values = np.unique(matrix.ravel())
+            colors = [im.cmap(im.norm(value)) for value in values]
+            patches = [mpatches.Patch(color = colors[i], label="{l}".format(l= int(values[i])+1) ) for i in range(len(values)) ]
+            plt.legend(handles = patches, bbox_to_anchor=(1.01, 1), loc=2, borderaxespad=0.)
+            
+        if legend == 'colorbar':
+            plt.colorbar()
+        #plt.autoscale(enable = True) 
+        
+        data = data.add(1)
+        #data_o.rename(columns = {0: 'x', 1:'y'})
+        save_plot(path, 300, fig, name, pd.concat([data_o, data], axis =1), type_file)
+        
+        fig.canvas.draw()
+        fig.canvas.flush_events()
+
+        #print(values)
+        return values, colors
+        
+class hyper_data:
+    
+    def __init__(self, name):
+        self.data = pd.DataFrame()    
+        self.position = pd.DataFrame()
+        self.name = name
+        self.resolution = 1
+        self.original = pd.DataFrame()
+        self.type = pd.DataFrame()
+        self.n = 0
+        self.m = 0
+        self.l = 0
+        self.z_resolution = 1
+        self.cluster = pd.DataFrame()
+        
+    def get_data(self):
+        return (self.data)
+    def get_position(self):
+        return (self.position)
+    
+    
+    def set_data(self, data):
+        self.data = data
+        
+    def set_position(self, position):
+        self.position = position
+        
+        max_m = pd.to_numeric(self.position['x'])
+        self.m = int(max_m.max() + 1)
+        max_n = pd.to_numeric(self.position['y'])
+        self.n = int(max_n.max() + 1)
+        
+    def rename_cluster(self, before, after):
+        for count in range (len(before)):
+            self.cluster[self.cluster.iloc[:] == before[count]] = after[count]
+        
+    def display_multi(self, path, type_file, enable, center, colors):
+        
+        values = self.cluster.unique()
+        indices = []
+        final = []
+        #colors = cm.jet[10]
+        #colors = ['blue', 'red', 'green', 'orange', 'm', 'y', 'k']
+        #!python numbers=disable
+        fig_width_pt = 246.0  # Get this from LaTeX using \showthe\columnwidth
+        inches_per_pt = 1.0/72.27               # Convert pt to inches
+        golden_mean = (sqrt(5)-1.0)/2.0         # Aesthetic ratio
+        fig_width = fig_width_pt*inches_per_pt  # width in inches
+        fig_height =fig_width*golden_mean       # height in inches
+        fig_size = [fig_width,fig_height] 
+        
+        # Edit the font, font size, and axes width
+        mpl.rcParams['font.family'] = 'Times New Roman'
+        plt.rcParams['font.size'] = 10
+        plt.rcParams['legend.fontsize'] = 8
+        plt.rcParams['xtick.labelsize'] = 8
+        plt.rcParams['ytick.labelsize'] = 8
+        plt.rcParams['axes.labelsize'] = 10
+        plt.rcParams['figure.figsize'] = fig_size
+                
+        fig, axs = plt.subplots(len(values), sharex = 'all', sharey = 'all', figsize = fig_size, dpi = 300, gridspec_kw = {'hspace': 0.02, 'wspace': 0})
+        
+        average = pd.DataFrame()
+        normalized_avg = pd.DataFrame()
+        normalized_std = pd.DataFrame()
+        
+        std = pd.DataFrame()
+        
+        if len(values) > 1:
+            for count in range(len(values)):
+                frame = self.data[self.cluster == values[count]]
+                if len(frame.index) > 1:
+
+                    average = frame.mean()
+                    std = frame.std()
+                    #####Noarmalization
+                    maximum_avg = average.max()
+                    minimum_avg = average.min()
+                    
+                    normalized_avg = (average - minimum_avg) / (maximum_avg - minimum_avg)
+                    normalized_std = (std - minimum_avg) / (maximum_avg - minimum_avg)
+                    #print(pd.to_numeric(self.data.columns))
+                    
+                    axs[count].plot(pd.to_numeric(self.data.columns), normalized_avg, label = values[count], linewidth = 1, color = colors[count])
+                    axs[count].legend([values[count]], frameon = False, loc = 'upper left')
+                
+                    axs[count].plot(pd.to_numeric(frame.columns), normalized_avg - normalized_std, color = colors[count], linewidth = 0.4)
+                    axs[count].plot(pd.to_numeric(frame.columns), normalized_avg + normalized_std, color = colors[count], linewidth = 0.4)
+                    axs[count].fill_between(pd.to_numeric(frame.columns), normalized_avg - normalized_std, normalized_avg + normalized_std, alpha = 0.2, color = colors[count])
+                
+                    axs[count].xaxis.set_major_locator(mpl.ticker.MultipleLocator(300))
+                    axs[count].xaxis.set_minor_locator(mpl.ticker.MultipleLocator(100))
+                    #axs[count].spines['bottom'].set_visible(False)
+                    axs[count].spines['top'].set_visible(False)
+                    axs[count].spines['right'].set_visible(False)
+                    axs[count].tick_params(left = False)
+                    axs[count].xaxis.set_visible(True)
+                    axs[count].set(yticklabels=[])  
+                    axs[count].set_xlabel('Raman Shift 1/cm')
+                else:            
+                    average = frame.mean()
+                    #####Normalization
+                    maximum_avg = average.max()
+                    minimum_avg = average.min()           
+                    normalized_avg = (average - minimum_avg) / (maximum_avg - minimum_avg) 
+                    axs[count].plot(pd.to_numeric(frame.columns), normalized_avg, label = values[count], linewidth = 0.8, color = colors[count])
+                    axs[count].legend([values[count]], frameon = False, loc = 'upper left')
+                    axs[count].xaxis.set_major_locator(mpl.ticker.MultipleLocator(300))
+                    axs[count].xaxis.set_minor_locator(mpl.ticker.MultipleLocator(100))
+                    #axs[count].spines['bottom'].set_visible(False)
+                    axs[count].spines['top'].set_visible(False)
+                    axs[count].spines['right'].set_visible(False)
+                    axs[count].tick_params(left = False)
+                    axs[count].xaxis.set_visible(True)
+                    axs[count].set(yticklabels=[])  
+                    axs[count].set_xlabel('Raman Shift 1/cm')
+                
+                if center == 1:
+                    axs[count].plot(pd.to_numeric(frame.columns), np.zeros(len(frame.columns))+0.5, linewidth = 0.5, color = 'grey')
+
+                if enable == 1:
+                    peak_finder(count, axs[count], normalized_avg, 0.3)
+    
+        #fig.suptitle(name)
+        #plt.ylabel('Intensity' )
+        fig.text(0.04, 0.5, 'Intensity', va='center', rotation='vertical')
+        #fig.text(0.5, 1, 'Raman Shift 1/cm', ha='center')
+        #plt.xlabel('Raman Shift 1/cm')
+        #axs.tight_layout()
+        #fig.tight_layout(rect=[0, 0.03, 1, 0.95])
+        fig.canvas.set_window_title(self.name) 
+        
+        final = normalized_avg.T
+        final['cluster'] = pd.Series(values)
+        #final.columns = data.columns
+        save_plot(path, 300, fig, self.name + '_centers', final, type_file)
+
+        fig.canvas.draw()
+        fig.canvas.flush_events()
+        #plt.autoscale()
+             
+        
+    def read_csv(self, file_path, resolution):
+        pre_result = pd.read_table(file_path, sep=',');
+        self.position = pre_result.iloc[:, len(pre_result.columns)-2:len(pre_result.columns)]
+        self.position.index = pre_result.index
+        self.data = pre_result.iloc[:, :len(pre_result.columns)-2]
+        self.original = pre_result.iloc[:, :len(pre_result.columns)-2]
+        self.resolution = resolution
+        
+        max_m = pd.to_numeric(self.position['x'])
+        self.m = int(max_m.max() + 1)
+        max_n = pd.to_numeric(self.position['y'])
+        self.n = int(max_n.max() + 1)
+        
+    def read_csv_3D(self, file_path, x_resolution, z_resolution):
+        pre_result = pd.read_table(file_path + self.name + '.csv', sep=',');
+        self.position = pre_result.iloc[:, len(pre_result.columns)-3:len(pre_result.columns)]
+        self.position.index = pre_result.index
+        self.data = pre_result.iloc[:, :len(pre_result.columns)-3]
+        self.original = pre_result.iloc[:, :len(pre_result.columns)-3]
+        self.resolution = x_resolution
+        self.z_resolution = z_resolution
+        
+        max_m = pd.to_numeric(self.position['x'])
+        self.m = int(max_m.max() + 1)
+        max_n = pd.to_numeric(self.position['y'])
+        self.n = int(max_n.max() + 1)
+        max_l = pd.to_numeric(self.position['z'])
+        self.l = int(max_l.max() + 1)
+        
+        
+    def read1064(self, path_file, path_calibration, resolution):
+        
+        data_raw = pd.read_table(path_file + '/data/data.txt', sep='\t', lineterminator='\n', header = None, usecols = range(514))#, skiprows=[0]);
+        calibration_raw = pd.read_table(path_calibration, sep=',', skiprows= 3, usecols = range(514))
+
+        #Correction data
+        if data_raw.iloc[0,0] == 1 or data_raw.iloc[0,0] == 1:
+            data_raw = data_raw.drop(index = 0)
+        
+        dark = pd.read_table(path_file + '/dark/dark.txt', sep='\t', lineterminator='\n', header = None, usecols = range(512), skiprows=[0]);
+        mean = dark.mean()
+        
+        data = data_raw.iloc[:, :512]
+        pos = data_raw.iloc[:, 512:514]
+        calibration_data = calibration_raw.iloc[:, :512] 
+        calibration_pos = calibration_raw.iloc[:, 512:514]
+        
+        pb = pd.read_table( path_file+ '/pb/data.txt', sep='\t', lineterminator='\n', skiprows=[0], header = None, usecols = range(512));
+        pbd = pd.read_table( path_file + '/pb/dark.txt', sep='\t', lineterminator='\n', skiprows=[0], header = None, usecols = range(512));
+         
+        #Substraction 
+        diff = data.subtract(mean)
+        diffp = pb.subtract(pbd)
+        pre_result = pd.DataFrame(diff.values - diffp.values)
+        
+        #Result
+        pre_result.columns = calibration_data.columns   
+        pos.columns = calibration_pos.columns
+        pos.index = pre_result.index
+        
+        pos['y'] = pos.iloc[::-1,1].values
+
+        self.position = pos
+        self.data = pre_result
+        self.original = pre_result
+        self.resolution = resolution
+        
+        max_m = pd.to_numeric(self.position['x'])
+        self.m = int(max_m.max() + 1)
+        max_n = pd.to_numeric(self.position['y'])
+        self.n = int(max_n.max() + 1)
+        
+    def smooth_savgol(self, window, polynomial, order):
+        pre_result = pd.DataFrame(scipy.signal.savgol_filter(self.data, window, polynomial, order, 1))
+        pre_result.columns = self.data.columns
+        self.data = pre_result
+    
+    def keep(self, lower, upper):
+        setted_list = pd.to_numeric(self.data.columns).to_list()
+        value_chosen = lower
+        minimum = float("inf")
+        count = 0
+        for val in setted_list:
+            count+=1
+            if abs(val - value_chosen) < minimum:
+                final_value = val
+                index_lower = count
+                minimum = abs(val - value_chosen)
+        value_chosen = upper
+        minimum = float("inf")
+        count = 0
+        for value in setted_list:
+            count+=1
+            if abs(value - value_chosen) < minimum:
+                final_value = value
+                index_upper = count
+                minimum = abs(value - value_chosen)
+        self.data = self.data.iloc[:, index_lower:index_upper]
+        
+    def baseline_airpls(self, landa):
+        #Baseline correction
+        matrix = np.zeros((len(self.data.index), len(self.data.columns)))
+        for item in range(len(self.data.index)):
+            matrix[item] = airPLS(self.data.iloc[item, :], landa)
+        correction = pd.DataFrame(self.data.to_numpy() - matrix)
+        correction.index = self.data.index
+        correction.columns = self.data.columns
+        self.data = correction
+        
+    def set_cluster(self, cluster):
+        self.cluster = cluster
+        self.cluster.columns = 'cluster'
+       
+    def plotting(self, index, ax):
+        ############# plotting setup #################################
+        #############################################################
+        
+        values = []
+        #!python numbers=disable
+        fig_width_pt = 246.0  # Get this from LaTeX using \showthe\columnwidth
+        inches_per_pt = 1.0/72.27               # Convert pt to inches
+        golden_mean = (sqrt(5)-1.0)/2.0         # Aesthetic ratio
+        fig_width = fig_width_pt*inches_per_pt  # width in inches
+        fig_height =fig_width*golden_mean       # height in inches
+        fig_size = [fig_width,fig_height]
+        
+        # Edit the font, font size, and axes width
+        mpl.rcParams['font.family'] = 'Times New Roman'
+        plt.rcParams['font.size'] = 10
+        plt.rcParams['legend.fontsize'] = 8
+        plt.rcParams['xtick.labelsize'] = 8
+        plt.rcParams['ytick.labelsize'] = 8
+        plt.rcParams['axes.labelsize'] = 10
+        
+        plt.rcParams['figure.figsize'] = fig_size
+        
+        #print (self.n)
+        fig = plt.figure(num = 'map: ' + self.name, figsize = fig_size, dpi = 300)    
+
+        size_x = self.resolution*self.m
+        size_y = self.resolution*self.n
+        aux = np.zeros((self.m, self.n))
+        aux[:] = np.nan
+
+        cluster = self.data.iloc[:, index]
+        
+        for count1 in range(len(self.data.index)):
+            xi = self.position.iloc[self.data.index[count1], 0]
+            yi = self.position.iloc[self.data.index[count1], 1]
+            aux[xi][yi] = cluster.iloc[count1] 
+            
+           
+        im = plt.imshow(np.rot90(aux, 1, axes = (0, 1)), extent = [0, size_x, 0, size_y])
+        plt.xlabel(' Size [mm]')
+        plt.ylabel(' Size [mm]')            
+
+        plt.tight_layout()
+        
+        #save_plot(path, 300, fig, self.name+'_'+wavenumber, pd.concat([self.data, self.position, cluster], axis = 1), type_file)
+    
+    def display_2D(self, wavenumber, path, type_file):
+        setted_list = pd.to_numeric(self.data.columns).to_list()
+        value_chosen = wavenumber
+        minimum = float("inf")
+        count = 0
+        aux[:] = np.nan
+
+        for value in setted_list:
+            count+=1
+            if abs(value - value_chosen) < minimum:
+                final_value = value
+                index = count
+                minimum = abs(value - value_chosen)
+                
+        if self.l == 1:
+            self.plotting(index)
+        else:
+            cluster = self.data.iloc[:, index]
+            for count1 in range(len(self.data.index)):
+                xi = self.position.iloc[self.data.index[count1], 0]
+                yi = self.position.iloc[self.data.index[count1], 1]
+                aux[xi][yi] = cluster.iloc[count1] 
+                
+            
+        
+
+
+    
+    def threshold(self, peak, lower, upper):
+        setted_list = pd.to_numeric(self.data.columns).to_list()
+        value_chosen = peak
+        minimum = float("inf")
+        count = 0
+        for value in setted_list:
+            count+=1
+            if abs(value - value_chosen) < minimum:
+                final_value = value
+                index = count
+                minimum = abs(value - value_chosen)
+                    
+        self.data = self.data[self.data.iloc[:,index] > lower]
+        self.data = self.data.dropna()
+        
+    def get_cluster(self):
+        return self.cluster
+    
+    def normalize_vector(self):
+        result = pd.DataFrame(normalize(self.data.values, norm = 'l2'))
+        result.columns = self.data.columns
+        result.index = self.data.index
+        self.data = result
+        
+    def get_spectrum(self, x, y):
+        max_m = pd.to_numeric(self.position['x'])
+        m = int(max_m.max() + 1)
+        index = m*y + x
+        return self.data.iloc[index, :]
+
+    def display_spectrum(self, x, y):
+        plt.figure(num = str(x)+str(y))      
+        index  = self.m*(self.n-1-y) + x
+        #print (index )
+        try:
+            plotting  = self.data.loc[[index]]
+            plt.title('x = ' + str(x) + '   y = ' + str(y))
+            plt.xlabel('Wavenumber [$cm^{-1}$]')
+            plt.ylabel('Intensity [counts]')
+            plt.autoscale(enable = True)
+            plt.plot(pd.to_numeric(self.data.columns).to_numpy(), plotting.values.transpose())
+        except:
+            print('The spectrum does not exist')
+    
+    def spectra_average(self):
+        average = self.data.mean()
+        std = self.data.std()
+        fig = plt.figure()
+        plt.plot(pd.to_numeric(average.index).to_numpy(), average.values, )
+        #plt.legend(self.name)
+
+        plt.fill_between(pd.to_numeric(average.index).to_numpy(), average.add(std).values, average.subtract(std).values, alpha=0.30)
+        plt.title(self.name)
+        
+        return average, std
+    
+    def kmeans_cluster(self, num_clusters, path, type_file):
+        # A list holds the silhouette coefficients for each k
+        silhouette_coefficients = []
+        #self.data = self.data.dropna()
+        send = self.data.copy()
+        #scaler = StandardScaler()
+        scaled_features = self.data.copy()
+        pre_clusters = 1
+
+        if num_clusters == 'auto':
+            # Notice you start at 2 clusters for silhouette coefficient
+            kmeans_kwargs = {
+                "init": "random",
+                "n_init": 10,
+                "max_iter": 300,
+                "random_state": 1,
+                "tol":0.0001
+            }
+        
+            try:
+                for k in range(2, 8):
+                    kmeans = KMeans(n_clusters=k, **kmeans_kwargs )
+                    kmeans.fit(scaled_features)
+                    score = silhouette_score(scaled_features , kmeans.labels_)
+                    silhouette_coefficients.append(score)
+                num_silhoutte =  max(silhouette_coefficients)
+            except ValueError:
+                print ('Error : ')
+        
+            for j in range(len(silhouette_coefficients)):
+                if (num_silhoutte == silhouette_coefficients[j]):
+                    pre_clusters+=j
+
+        else:
+            pre_clusters = num_clusters
+            
+        if pre_clusters > 1:
+            kmean = KMeans(algorithm='auto', 
+                    copy_x=True, 
+                    init='k-means++', # selects initial cluster centers
+                    max_iter=300,
+                    n_clusters = pre_clusters, 
+                    n_init=10, 
+                    random_state=1, 
+                    tol=0.0001, # min. tolerance for distance between clusters
+                    verbose=0)
+            
+            kmean.fit(scaled_features)        
+            centers = pd.DataFrame(kmean.cluster_centers_)
+            centers.columns = self.data.columns
+            
+            #Selecting reduced area
+            labels = pd.Series(kmean.labels_)
+            labels.index = self.data.index
+            labels = labels.add(1)
+            labels.rename('cluster')
+            #labels.rename(columns = {0:'cluster'}, inplace = True)
+            
+            #saved = reduced_to_large2D(self.original.copy(), self.data.copy())
+            #save = pd.concat([saved, self.position], axis = 1)
+            #values, colors = plotting(self.position, labels, self.resolution, self.original, 0, None, self.name+'_cluster', '', 'cluster', None, path, save, self.n, self.m, type_file)
+            #plotting(self.position, data)
+    
+            #send['cluster'] = labels
+            #display_multi(send, path, self.name+'_spectra', values, colors, type_file, 0)
+        
+            self.cluster = labels
+            
+            return labels
+        else:
+            print('Error: number of clusters found is 1!!')
+        
+    def matrix(self, cluster):
+        matrix = self.position
+        plot = np.zeros(self.n*self.m).reshape(self.n, self.m)
+        for count1 in range(self.n*self.m):
+            plot[self.n - 1 - matrix.iloc[count1, 1]][matrix.iloc[count1, 0]] = cluster.iloc[count1]
+        return plot
+
+    def hierarchical_cluster(self, linkage, n_clusters, path):
+
+        #plot = plotting(self.position, labels, self.resolution, self.original, 0, None, 'Hierchical: '+ str(n_clusters) + ' clusters', '', 'cluster')
+        model = AgglomerativeClustering(linkage=linkage, n_clusters=n_clusters, affinity = 'euclidean')
+
+        saved = reduced_to_large2D(self.original.copy(), self.data.copy())
+        save = pd.concat([saved, self.position], axis = 1)
+        
+        if n_clusters == 'dendogram':
+            plt.figure()
+            dendro = sch.dendrogram(sch.linkage(self.data, method = linkage))
+        else:
+            model = AgglomerativeClustering(linkage=linkage, n_clusters=n_clusters, affinity = 'euclidean')
+            model.fit(self.data)
+            labels = pd.DataFrame(model.labels_)
+            labels.index = self.data.index
+            plotting(self.position, labels, self.resolution, self.original, 0, None, self.name+'_cluster', 'nearest', 'cluster', None, path, save, self.n, self.m)
+            #plt.show()
+        
+        return model
+        
+    def VCA(self, num_clusters):
+        #Endmembers
+        max_m = pd.to_numeric(self.position['x'])
+        max_n = pd.to_numeric(self.position['y'])
+        m = int(max_m.max() + 1)
+        n = int(max_n.max() + 1)
+        p = len(self.data.columns)
+        
+        cube = CSV_to_Cube(self.original.to_numpy(), n, m, p)
+        
+        wave = list(pd.to_numeric(self.data.columns))
+        axe = {'wavelength' : wave}
+        nfindr = eea.NFINDR()
+        U = nfindr.extract(cube, 4, maxit=5, normalize=True, ATGP_init=True)
+        #nfindr.plot('nfindr', axes = axe, suffix = self.name)
+
+    def save_data(self, file):
+        result = pd.concat([self.data, self.position], axis = 1)
+        gfg_csv_data = pd.DataFrame(result).to_csv(file + self.name + '.csv', index = False, header = True) 
+
+    def PCA(self, num_components, kernel, degree):
+        # Creating figure
+        
+        transformer = KernelPCA(n_components=num_components, kernel=kernel, degree = degree)
+        X_transformed = pd.DataFrame(transformer.fit_transform(self.data))
+
+        display_scatter(num_components, X_transformed, self.cluster)
+        
+        return X_transformed
+    
+    def read_mat(self, path, start, spectral_resolution, spatial_resolution):
+        #***** Reading mat Hyperspectral data *******
+        matrix = annots['C']
+        
+        n = len(matrix)
+        m = len(matrix[0])
+        p = len(matrix[0][0])
+        
+        position_ = np.arange(n*m*2).reshape(n*m, 2)
+        
+        
+        ####3D to 2D
+        data_ = np.zeros((n*m,p)) 
+        for j in range(0, n):
+            for i in range(0, m):
+                for l in range(0, p):
+                    data_[j*m+i,l] = matrix[j, i,l]  
+        ####Position
+        for j in range(0, n):
+            for i in range(0, m):
+                position_[j*m + i, 1] = n - j -1
+                position_[j*m + i, 0] = i
+                
+        ###Numpy to DataFrame
+        data = pd.DataFrame(data_)
+        position = pd.DataFrame(position_)
+        
+        wavenumber = np.zeros(p)
+        
+        for count in range(p):
+            wavenumber[count] = round(start + count*spectral_resolution, 1)
+        
+        data.columns = wavenumber
+        
+        data = data.rename(columns={'0.0': 'x', '1.0': 'y'})
+        
+        self.data = data
+        self.position = position
+        self.n = n
+        self.m = m
+        self.resolution = spatial_resolution
+        self.original = data
+        
+    def set_resolution(self, resolution):
+        self.resolution = resolution
+        
+        print (self.name)
+    
+    def plot_map(self, path, type_file):
+        
+        ##############################################################
+        ############# plotting setup #################################
+        #############################################################
+        
+        values = []
+        #!python numbers=disable
+        fig_width_pt = 246.0  # Get this from LaTeX using \showthe\columnwidth
+        inches_per_pt = 1.0/72.27               # Convert pt to inches
+        golden_mean = (sqrt(5)-1.0)/2.0         # Aesthetic ratio
+        fig_width = fig_width_pt*inches_per_pt  # width in inches
+        fig_height =fig_width*golden_mean       # height in inches
+        fig_size = [fig_width,fig_height]
+        
+        # Edit the font, font size, and axes width
+        mpl.rcParams['font.family'] = 'Times New Roman'
+        plt.rcParams['font.size'] = 10
+        plt.rcParams['legend.fontsize'] = 8
+        plt.rcParams['xtick.labelsize'] = 8
+        plt.rcParams['ytick.labelsize'] = 8
+        plt.rcParams['axes.labelsize'] = 10
+        
+        plt.rcParams['figure.figsize'] = fig_size
+        
+        #print (self.n)
+        fig = plt.figure(num = 'map: ' + self.name, figsize = fig_size, dpi = 300)    
+
+        size_x = self.resolution*self.m
+        size_y = self.resolution*self.n
+        aux = np.zeros((self.m, self.n))
+        aux[:] = np.nan
+
+        cluster = self.cluster.copy()
+        unique = self.cluster.unique()
+        #print(unique)
+        if(type(self.cluster.iloc[0]) == str):
+            for count in range (0, len(unique)):
+                cluster[cluster.iloc[:] == unique[count]] = count + 1
+        
+        for count1 in range(len(self.data.index)):
+            xi = self.position.iloc[self.data.index[count1], 0]
+            yi = self.position.iloc[self.data.index[count1], 1]
+            aux[xi][yi] = cluster.iloc[count1] 
+            
+        colors = ['blue', 'red', 'green', 'orange', 'm', 'y', 'k', 'c', 'pink', 'royalblue']
+        #print(color)
+        values = cluster.unique()
+        label = self.cluster.unique()
+           
+        cmap = LinearSegmentedColormap.from_list("mycmap", colors)
+        #new_data = self.cluster.copy()
+        #im = plt.pcolor(aux, cmap = cmap)
+        im = plt.imshow(np.rot90(aux, 1, axes = (0, 1)), extent = [0, size_x, 0, size_y], cmap = cmap)
+        plt.xlabel(' Size [mm]')
+        plt.ylabel(' Size [mm]')
+
+        colors = [im.cmap(im.norm(value)) for value in values]
+        patches = [mpatches.Patch(color = colors[i], label="{l}".format(l= label[i]) ) for i in range(0, len(values)) ]
+        plt.legend(handles = patches, bbox_to_anchor=(1.01, 1), loc=2, borderaxespad=0, frameon = False)
+            
+
+        plt.tight_layout()
+        
+        save_plot(path, 300, fig, self.name, pd.concat([self.data, self.position, self.cluster], axis = 1), type_file)
+        #save = pd.concat([self.data, self.position], axis = 1)
+        #values, colors = plotting(self.position, pd.DataFrame(self.cluster), self.resolution, self.original, 0, None, self.name+'_map_cluster', '', 'cluster', None, path, save, self.n, self.m, type_file)
+        return colors
+         
+    def combine_clusters(self, before, after):
+        
+        cluster = self.cluster.copy()
+        
+        for count in range(len(before)):
+            cluster[cluster.iloc[:] == before[count]] = after[count]
+            
+        self.cluster = cluster.dropna()
+        
+        self.data = self.data.loc[self.cluster.index]
+        
+        return (self.cluster)
+    
+    def spikes(self, limit, size):
+        result = np.zeros(len(self.data.index)*len(self.data.columns)).reshape(len(self.data.index), len(self.data.columns))
+        copy = self.data.copy()
+        for count in range (len(copy.index)):
+            array = np.array(copy.iloc[count, :])
+            spike = fixer(array, size, limit)
+            result[count] = spike.T 
+        
+        frame = pd.DataFrame(result)
+        frame.columns = self.data.columns
+        frame.index = self.data.index
+        
+        self.data = frame.dropna()
+        
+        return frame
+    
+    def cluster_spikes(self, cluster, limit):
+        selection = 0
+        size = 5
+        #result = np.zeros(len(self.data.index)*len(self.data.columns)).reshape(len(self.data.index), len(self.data.columns))
+        copy = self.data.copy()
+        #print('hallo')
+        for count0 in range (len(cluster)):
+            for count in range (len(copy.index)):
+                selection = self.cluster.iloc[count]
+                #print(selection)
+                if cluster[count0]-1 == int(selection):
+                    array = np.array(copy.iloc[count, :])
+                    spike = fixer(array, size, limit)
+                    result = pd.Series(spike.T)
+                    self.data.iloc[count, :] = result.values
+        self.data = self.data.dropna()
+
+    
+    
+        
+    
+
+
+
+
+
+
+
+
+        
